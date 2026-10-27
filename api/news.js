@@ -1,15 +1,21 @@
-// Serverless function: pulls 3 positive headlines from good-news RSS feeds.
-// Cached at the edge for 6 hours so the morning load is instant.
+// Serverless function: 3 local headlines for Long Beach and Orange County.
+// Two from Long Beach sources, one from Orange County, newest first.
+// Cached at the edge for 1 hour.
 
-const FEEDS = [
-  { name: "Good News Network", url: "https://www.goodnewsnetwork.org/feed/" },
-  { name: "Positive News", url: "https://www.positive.news/feed/" },
-  { name: "Reasons to be Cheerful", url: "https://reasonstobecheerful.world/feed/" },
-  { name: "Optimist Daily", url: "https://www.optimistdaily.com/feed/" },
-];
+const FEEDS = {
+  longBeach: [
+    { name: "Long Beach Post", url: "https://lbpost.com/feed/" },
+    { name: "Long Beach Business Journal", url: "https://lbbusinessjournal.com/feed/" },
+    { name: "Long Beach Watchdog", url: "https://thelongbeachwatchdog.com/feed/" },
+  ],
+  orangeCounty: [
+    { name: "Voice of OC", url: "https://voiceofoc.org/feed/" },
+    { name: "OC Register", url: "https://www.ocregister.com/news/local-news/feed/" },
+    { name: "Daily Pilot", url: "https://www.latimes.com/socal/daily-pilot/rss2.0.xml" },
+  ],
+};
 
-// Skip anything that slipped into a "good news" feed but reads heavy.
-const SKIP = /\b(dies|died|death|dead|killed|war|shooting|cancer|tragic|murder|attack|abuse|disaster|sponsored|podcast|webinar|donate)\b/i;
+const SKIP = /\b(sponsored|advertorial|podcast|newsletter|crossword|horoscope)\b/i;
 
 function decode(s) {
   return s
@@ -38,10 +44,10 @@ async function readFeed(feed) {
     if (!res.ok) return [];
     const xml = await res.text();
     const items = xml.match(/<item[\s>][\s\S]*?<\/item>/gi) || [];
-    return items.slice(0, 15).map((it) => ({
+    return items.slice(0, 20).map((it) => ({
       title: tag(it, "title"),
       link: tag(it, "link"),
-      date: tag(it, "pubDate"),
+      time: Date.parse(tag(it, "pubDate")) || 0,
       source: feed.name,
     })).filter((i) => i.title && i.link && !SKIP.test(i.title));
   } catch {
@@ -51,24 +57,45 @@ async function readFeed(feed) {
   }
 }
 
-export default async function handler(req, res) {
-  const results = await Promise.all(FEEDS.map(readFeed));
+// Newest stories across a region's feeds, at most one per source until each has had a turn.
+async function region(feeds) {
+  const lists = await Promise.all(feeds.map(readFeed));
+  const all = lists.flat().sort((a, b) => b.time - a.time);
+  const bySource = new Map();
+  for (const item of all) {
+    if (!bySource.has(item.source)) bySource.set(item.source, []);
+    bySource.get(item.source).push(item);
+  }
+  const out = [];
+  for (let round = 0; round < 20; round++) {
+    const batch = [];
+    for (const list of bySource.values()) if (list[round]) batch.push(list[round]);
+    if (!batch.length) break;
+    out.push(...batch.sort((a, b) => b.time - a.time));
+  }
+  return out;
+}
 
-  // Round-robin across sources so the 3 headlines come from different places.
+export default async function handler(req, res) {
+  const [lb, oc] = await Promise.all([region(FEEDS.longBeach), region(FEEDS.orangeCounty)]);
+
   const picks = [];
   const seen = new Set();
-  for (let round = 0; picks.length < 3 && round < 15; round++) {
-    for (const list of results) {
-      const item = list[round];
-      if (!item) continue;
+  const take = (list, n, area) => {
+    for (const item of list) {
+      if (picks.filter((p) => p.area === area).length >= n) break;
       const key = item.title.toLowerCase().slice(0, 40);
       if (seen.has(key)) continue;
       seen.add(key);
-      picks.push(item);
-      if (picks.length === 3) break;
+      picks.push({ title: item.title, link: item.link, source: item.source, area });
     }
-  }
+  };
+  take(lb, 2, "Long Beach");
+  take(oc, 1, "Orange County");
+  // If one region came back empty, fill from the other.
+  if (picks.length < 3) take(lb, 3 - picks.filter((p) => p.area === "Orange County").length, "Long Beach");
+  if (picks.length < 3) take(oc, 3 - picks.filter((p) => p.area === "Long Beach").length, "Orange County");
 
-  res.setHeader("Cache-Control", "s-maxage=21600, stale-while-revalidate=86400");
-  res.status(200).json({ headlines: picks, fetchedAt: new Date().toISOString() });
+  res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=21600");
+  res.status(200).json({ headlines: picks.slice(0, 3), fetchedAt: new Date().toISOString() });
 }

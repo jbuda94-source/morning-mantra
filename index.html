@@ -63,6 +63,9 @@
   }
   .mantra p:nth-child(2) { animation-delay: 0.35s; }
   .mantra p:nth-child(3) { animation-delay: 0.7s; }
+  .focus p { font-size: clamp(19px, 5.2vw, 23px); color: var(--ink-soft); margin-bottom: 10px; animation-delay: 1.1s; }
+  .focus p:nth-child(2) { animation-delay: 1.3s; }
+  .focus p:nth-child(3) { animation-delay: 1.5s; }
   @keyframes rise { to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) { .mantra p { animation: none; opacity: 1; transform: none; } }
 
@@ -112,8 +115,13 @@
     <button class="toggle" id="toggle">Show original</button>
   </section>
 
+  <section class="mantra focus">
+    <div class="label" id="focus-label">Also working on</div>
+    <div id="focus"></div>
+  </section>
+
   <section>
-    <div class="label">Good news</div>
+    <div class="label">Long Beach &amp; OC</div>
     <ul class="news" id="news">
       <li class="skeleton"></li><li class="skeleton"></li><li class="skeleton"></li>
     </ul>
@@ -161,7 +169,13 @@
 
   document.getElementById("reminder").textContent = reminder;
 
-  // Positive news
+  // Second mantra on a rotating theme
+  const focus = FOCUS[(dayNum * 5 + 11) % FOCUS.length];
+  document.getElementById("focus-label").textContent = "Also working on · " + focus.theme;
+  const fbox = document.getElementById("focus");
+  focus.lines.forEach((l) => { const p = document.createElement("p"); p.textContent = l; fbox.appendChild(p); });
+
+  // Local headlines
   const list = document.getElementById("news");
   fetch("/api/news")
     .then((r) => r.json())
@@ -176,7 +190,7 @@
         const a = document.createElement("a");
         a.href = h.link; a.target = "_blank"; a.rel = "noopener";
         const t = document.createElement("div"); t.className = "title"; t.textContent = h.title;
-        const s = document.createElement("div"); s.className = "src"; s.textContent = h.source;
+        const s = document.createElement("div"); s.className = "src"; s.textContent = h.area + " · " + h.source;
         a.append(t, s); li.appendChild(a); list.appendChild(li);
       });
     })

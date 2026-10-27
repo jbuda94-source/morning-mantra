@@ -1,5 +1,5 @@
 // Network-first so new content shows up right away; falls back to cache offline.
-const CACHE = "mantra-v1";
+const CACHE = "mantra-v2";
 const SHELL = ["/", "/content.js", "/manifest.json", "/icon-192.png"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener("activate", (e) => {
